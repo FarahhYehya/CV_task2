@@ -2,8 +2,8 @@
 Active Contour Model (snake) - greedy algorithm, implemented from scratch (NumPy only).
 The contour is initialised BY HAND (mouse clicks); OpenCV is used only for the window / clicks.
 
-Re-uses the helpers of part 1 (shape_detection.py):
-    _to_gray, _gradients, _in_bounds, draw_shapes, DEFAULT_SIGMA
+Re-uses the shared helpers (image_io.py: to_gray, gradients, in_bounds, DEFAULT_SIGMA)
+and draw_shapes of part 1 (Canny_and_objects_detection.py).
 
 Main functions
 --------------
@@ -31,7 +31,8 @@ Chain code (Freeman, 8 directions, image coordinates: x right, y down):
 """
 import numpy as np
 
-from Canny_and_objects_detection import DEFAULT_SIGMA, _gradients, _in_bounds, _to_gray, draw_shapes
+from .Canny_and_objects_detection import draw_shapes
+from .image_io import DEFAULT_SIGMA, gradients, in_bounds, to_gray
 
 # Freeman 8-direction steps: index = code
 DX = np.array([1, 1, 0, -1, -1, -1, 0, 1])
@@ -44,6 +45,8 @@ DY = np.array([0, -1, -1, -1, 0, 1, 1, 1])
 def resample_contour(points, spacing=5.0):
     """Closed polygon through `points` -> points placed every `spacing` px along its length."""
     pts = np.asarray(points, dtype=np.float64)
+    if pts.ndim != 2 or pts.shape[1] != 2 or len(pts) < 3:
+        raise ValueError("points must be at least 3 (x, y) pairs")
     closed = np.vstack([pts, pts[:1]])
     s = np.r_[0, np.cumsum(np.hypot(*np.diff(closed, axis=0).T))]
     t = np.linspace(0, s[-1], max(8, int(round(s[-1] / spacing))), endpoint=False)
@@ -56,7 +59,7 @@ def _corner_points(pts, grad, curv_thresh, grad_thresh):
     u /= np.maximum(np.hypot(u[:, 0], u[:, 1]), 1e-6)[:, None]
     curv = np.sum((u - np.roll(u, 1, axis=0)) ** 2, axis=1)
     x, y = np.rint(pts[:, 0]).astype(int), np.rint(pts[:, 1]).astype(int)
-    on_image = _in_bounds(x, y, *grad.shape)
+    on_image = in_bounds(x, y, *grad.shape)
     g = np.where(on_image, grad[np.clip(y, 0, grad.shape[0] - 1), np.clip(x, 0, grad.shape[1] - 1)], 0)
     peak = (curv > np.roll(curv, 1)) & (curv > np.roll(curv, -1))
     return peak & (curv > curv_thresh) & (g > grad_thresh)
@@ -72,7 +75,9 @@ def greedy_snake(image, points, alpha=1.0, beta=1.0, gamma=1.2, sigma=DEFAULT_SI
     `points` = [(x, y), ...] initial contour (e.g. clicked by hand), `neighborhood` = odd search window.
     Returns (final_points as n x 2 float array, history = list of arrays, one per iteration).
     """
-    grad = np.hypot(*_gradients(_to_gray(image), sigma))
+    if neighborhood < 3 or neighborhood % 2 == 0:
+        raise ValueError("neighborhood must be an odd integer >= 3 (3, 5, 7, ...)")
+    grad = np.hypot(*gradients(to_gray(image), sigma))
     h, w = grad.shape
     pts = resample_contour(points, spacing)
     n = len(pts)
@@ -129,12 +134,14 @@ def _pixel_path(points):
         x = np.rint(np.linspace(x1, x2, k)).astype(int)
         y = np.rint(np.linspace(y1, y2, k)).astype(int)
         path.extend(zip(x[:-1].tolist(), y[:-1].tolist()))
-    out = [path[0]]
+    out = path[:1]
     for q in path[1:]:
         if q != out[-1]:                                            # drop consecutive duplicates
             out.append(q)
     if len(out) > 1 and out[-1] == out[0]:
         out.pop()
+    if len(out) < 2:
+        raise ValueError("the contour collapsed to a single pixel - no chain code possible")
     return out
 
 
@@ -206,7 +213,7 @@ def select_contour_by_hand(image, window="Draw the initial contour"):
 
 
 # --------------------------------------------------------------------------- #
-#  Command line:  python active_contour.py image.png
+#  Command line (from CV_task2/):  python -m services.Active_contour image.png
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":
     import argparse

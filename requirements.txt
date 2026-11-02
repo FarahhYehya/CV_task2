@@ -1,0 +1,16 @@
+# Versions the code was run and tested with (Python 3.14, Windows).
+# Install inside venv:  pip install -r requirements.txt
+
+# services (image processing) - OpenCV only reads / writes image files
+numpy==2.5.4
+opencv-python==5.0.0.93
+
+# api (REST backend)
+fastapi==0.143.3
+pydantic==2.14.1
+uvicorn==0.54.0
+python-multipart==0.0.32
+
+# tests
+pytest==9.1.1
+httpx==0.28.1

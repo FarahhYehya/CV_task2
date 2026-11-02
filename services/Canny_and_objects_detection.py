@@ -26,93 +26,21 @@ as (cx, cy, width, height, angle): `width` is the full length of the axis that m
 """
 import numpy as np
 
-
-DEFAULT_SIGMA = 1.4      # Gaussian blur strength used everywhere (change it per call with `sigma=`)
+from .image_io import DEFAULT_SIGMA, gradients, in_bounds, to_gray, window_op
 
 
 # --------------------------------------------------------------------------- #
-#  Shared helpers (each piece of logic lives in exactly one place)
+#  Detection helpers (generic image helpers live in image_io.py)
 # --------------------------------------------------------------------------- #
-def _to_gray(image):
-    """Accept grayscale, BGR or BGRA (any dtype) and return float32 gray in 0..255."""
-    if image is None:
-        raise ValueError("image is empty")
-    image = np.asarray(image)
-    if image.size == 0:
-        raise ValueError("image is empty")
-    image = image.astype(np.float32)
-    if image.dtype != np.uint8 and (image.max() > 255 or image.min() < 0 or image.max() <= 1.0):
-        lo, hi = float(image.min()), float(image.max())
-        image = (image - lo) * (255.0 / (hi - lo)) if hi > lo else np.zeros_like(image)
-
-    if image.ndim == 2:
-        return image
-    if image.ndim == 3 and image.shape[2] == 1:
-        return image[:, :, 0]
-    if image.ndim == 3 and image.shape[2] in (3, 4):          # BGR / BGRA
-        return 0.114 * image[:, :, 0] + 0.587 * image[:, :, 1] + 0.299 * image[:, :, 2]
-    raise ValueError("image must be grayscale, BGR or BGRA")
-
-
-def _sliding(arr, radius, axis, op=np.add, weights=None, mode="constant"):
-    """
-    Combine the (2*radius+1) shifted copies of `arr` along one axis with `op`
-    (optionally weighting each shift).  This single routine is the base of the
-    Gaussian blur (weights), box sums (np.add), max filters (np.maximum) and
-    dilation (np.logical_or).
-    """
-    pad = [(0, 0)] * arr.ndim
-    pad[axis] = (radius, radius)
-    padded = np.pad(arr, pad, mode=mode)
-    n = arr.shape[axis]
-    out = None
-    for i in range(2 * radius + 1):
-        sl = [slice(None)] * arr.ndim
-        sl[axis] = slice(i, i + n)
-        piece = padded[tuple(sl)]
-        if weights is not None:
-            piece = weights[i] * piece
-        out = piece.copy() if out is None else op(out, piece)
-    return out
-
-
-def _window_op(arr, radius, op, axes=None):
-    """Separable (2r+1) window filter (sum / max / or) over `axes` (default: all axes)."""
-    for axis in (range(arr.ndim) if axes is None else axes):
-        arr = _sliding(arr, radius, axis, op)
-    return arr
-
-
-def _gaussian_blur(gray, sigma=DEFAULT_SIGMA):
-    """Separable Gaussian blur.  sigma <= 0 means 'no blur'."""
-    gray = np.asarray(gray, dtype=np.float32)
-    if sigma <= 0:
-        return gray
-    r = max(1, int(round(3 * sigma)))
-    x = np.arange(-r, r + 1, dtype=np.float32)
-    kernel = np.exp(-(x ** 2) / (2 * sigma ** 2))
-    kernel /= kernel.sum()
-    blurred = _sliding(gray, r, 0, weights=kernel, mode="edge")
-    return _sliding(blurred, r, 1, weights=kernel, mode="edge")
-
-
-def _gradients(gray, sigma=DEFAULT_SIGMA):
-    """Gaussian blur followed by 3x3 Sobel.  Returns (gx, gy)."""
-    p = np.pad(_gaussian_blur(gray, sigma), 1, mode="edge")
-    gx = (p[:-2, 2:] + 2 * p[1:-1, 2:] + p[2:, 2:]) - (p[:-2, :-2] + 2 * p[1:-1, :-2] + p[2:, :-2])
-    gy = (p[2:, :-2] + 2 * p[2:, 1:-1] + p[2:, 2:]) - (p[:-2, :-2] + 2 * p[:-2, 1:-1] + p[:-2, 2:])
-    return gx, gy
-
-
 def _edge_points(image, edge_image, sigma):
     """
     Shared set-up of the circle and ellipse detectors.
     Returns (edge_mask, xs, ys, dx, dy): the boolean edge map, the coordinates of
     the edge pixels and the unit gradient direction (dx, dy) at each of them.
     """
-    gray = _to_gray(image)
+    gray = to_gray(image)
     edges = edge_image if edge_image is not None else canny_edge_detector(image, sigma=sigma)
-    gx, gy = _gradients(gray, sigma)
+    gx, gy = gradients(gray, sigma)
     ys, xs = np.nonzero(edges)
     mag = np.hypot(gx[ys, xs], gy[ys, xs])
     good = mag > 1e-6
@@ -122,12 +50,12 @@ def _edge_points(image, edge_image, sigma):
 
 def _near_edge(edge_mask, tolerance):
     """Boolean map: True within +/- `tolerance` pixels of an edge."""
-    return _window_op(edge_mask, tolerance, np.logical_or)
+    return window_op(edge_mask, tolerance, np.logical_or)
 
 
 def _local_maxima(acc, radius, min_votes):
     """Boolean mask of accumulator cells that are the maximum of their window and >= min_votes."""
-    return (acc == _window_op(acc, radius, np.maximum)) & (acc >= min_votes)
+    return (acc == window_op(acc, radius, np.maximum)) & (acc >= min_votes)
 
 
 def _pick_peaks(acc, min_votes, radius, min_separation, max_peaks):
@@ -141,10 +69,6 @@ def _pick_peaks(acc, min_votes, radius, min_separation, max_peaks):
             break
     return chosen
 
-
-def _in_bounds(x, y, h, w):
-    """Boolean mask: which integer coordinates (x, y) lie inside an h x w image."""
-    return (x >= 0) & (x < w) & (y >= 0) & (y < h)
 
 
 def _rotate(px, py, theta):
@@ -176,7 +100,7 @@ def _outline_support(near_edge, cx, cy, a, b, phi_deg, min_inside):
     n = max(72, int(np.pi * (3 * (a + b) - np.sqrt((3 * a + b) * (a + 3 * b)))))
     ox, oy = _ellipse_points(cx, cy, a, b, phi_deg, n)
     ox, oy = np.rint(ox).astype(int), np.rint(oy).astype(int)
-    inside = _in_bounds(ox, oy, h, w)
+    inside = in_bounds(ox, oy, h, w)
     if inside.mean() < min_inside:
         return None
     return float(near_edge[oy[inside], ox[inside]].mean())
@@ -224,10 +148,11 @@ def canny_edge_detector(image, low_threshold=50, high_threshold=150, sigma=DEFAU
     if low_threshold > high_threshold:
         low_threshold, high_threshold = high_threshold, low_threshold
 
-    h, w = _to_gray(image).shape
+    gray = to_gray(image)
+    h, w = gray.shape
 
     # 1-2) Gaussian smoothing + Sobel gradients
-    gx, gy = _gradients(_to_gray(image), sigma)
+    gx, gy = gradients(gray, sigma)
     magnitude = np.hypot(gx, gy)
     angle = (np.rad2deg(np.arctan2(gy, gx)) + 180) % 180
 
@@ -322,7 +247,7 @@ def detect_lines(image, edge_image=None, rho=1, theta=np.pi / 180,
         acc += np.bincount((r + max_rho + theta_offset).ravel(), minlength=acc.size)
     acc = acc.reshape(len(thetas), n_rho)
 
-    # 2) peaks (accumulator lightly smoothed along rho, then local maxima)
+    # 2) peaks: local maxima of the accumulator in a 5x5 (theta, rho) window, strongest 150 kept
     ti, ri = np.nonzero(_local_maxima(acc, 2, threshold))
     order = np.argsort(-acc[ti, ri])[:150]
 
@@ -387,11 +312,11 @@ def detect_circles(image, edge_image=None, sigma=DEFAULT_SIGMA, min_radius=10, m
         for sign in (1.0, -1.0):
             cx = np.rint(xs[s:s + chunk, None] + sign * dx[s:s + chunk, None] * radii).astype(np.int64)
             cy = np.rint(ys[s:s + chunk, None] + sign * dy[s:s + chunk, None] * radii).astype(np.int64)
-            ok = _in_bounds(cx, cy, h, w)
+            ok = in_bounds(cx, cy, h, w)
             acc += np.bincount((cy * w + cx)[ok], minlength=acc.size)
 
     # 2) candidate centres
-    centres = _pick_peaks(_window_op(acc.reshape(h, w), 1, np.add), min_votes,
+    centres = _pick_peaks(window_op(acc.reshape(h, w), 1, np.add), min_votes,
                           radius=4, min_separation=5, max_peaks=max_candidates)
     near_edge = _near_edge(edge_mask, 2)
 
@@ -405,7 +330,7 @@ def detect_circles(image, edge_image=None, sigma=DEFAULT_SIGMA, min_radius=10, m
         if sel.sum() < min_votes:
             continue
         hist = np.bincount(np.rint(dist[sel]).astype(int), minlength=max_radius + 3).astype(np.int64)
-        for r0 in np.flatnonzero(_local_maxima(_window_op(hist, 1, np.add), 3, min_votes)):
+        for r0 in np.flatnonzero(_local_maxima(window_op(hist, 1, np.add), 3, min_votes)):
             if r0 < min_radius:
                 continue
             r = float(dist[sel & (np.abs(dist - r0) <= 2)].mean())
@@ -441,7 +366,7 @@ def _centre_candidates(xs, ys, ang, h, w, min_pair_dist, max_pair_dist,
             if mid.size:
                 acc += np.bincount(mid, minlength=acc.size)
 
-    return _pick_peaks(_window_op(acc.reshape(h, w), 1, np.add), min_votes,
+    return _pick_peaks(window_op(acc.reshape(h, w), 1, np.add), min_votes,
                        radius=3, min_separation=4, max_peaks=max_candidates)
 
 
@@ -460,7 +385,7 @@ def _axes_peak(px, py, a_min, a_max, angle_step):
         valid &= (b >= a_min) & (b <= a_vals[None, :])
         acc[ip] = np.bincount((a_index + b)[valid], minlength=n_a * n_b).reshape(n_a, n_b)
 
-    acc = _window_op(acc, 1, np.add, axes=(1, 2))               # smooth a and b
+    acc = window_op(acc, 1, np.add, axes=(1, 2))               # smooth a and b
     acc = acc + np.roll(acc, 1, axis=0) + np.roll(acc, -1, axis=0)   # smooth phi (wraps at 180 deg)
     ip, ia, ib = np.unravel_index(np.argmax(acc), acc.shape)
     return float(a_vals[ia]), float(ib), float(np.rad2deg(phis[ip])), int(acc[ip, ia, ib])
@@ -516,7 +441,7 @@ def detect_ellipses(image, edge_image=None, sigma=DEFAULT_SIGMA, min_axis_length
     found = []
     for cx, cy in centres:
         mx, my = 2 * cx - xs, 2 * cy - ys                        # mirror image of every edge point
-        inside = _in_bounds(mx, my, h, w)
+        inside = in_bounds(mx, my, h, w)
         sym = np.zeros(len(xs), dtype=bool)
         sym[inside] = near1[my[inside], mx[inside]]
         px, py = (xs[sym] - cx).astype(np.float32), (ys[sym] - cy).astype(np.float32)
@@ -550,24 +475,25 @@ def detect_ellipses(image, edge_image=None, sigma=DEFAULT_SIGMA, min_axis_length
 # --------------------------------------------------------------------------- #
 #  Superimpose the detected shapes on the image
 # --------------------------------------------------------------------------- #
-def draw_shapes(image, lines=(), circles=(), ellipses=(), thickness=2):
+def draw_shapes(image, lines=(), circles=(), ellipses=(), thickness=3):
     """
     Return a BGR copy of `image` with the shapes drawn on it:
     lines = green, circles = red, ellipses = blue (BGR colours).
+    `thickness` = line width in pixels (each drawn point is a thickness x thickness square).
     """
     img = np.asarray(image)
     if img.ndim == 2:
         img = np.stack([img] * 3, axis=2)
-    out = img[:, :, :3].astype(np.uint8).copy()
+    out = np.clip(img[:, :, :3], 0, 255).astype(np.uint8)       # clip first: a cast alone wraps 300 -> 44
     h, w = out.shape[:2]
-    r = thickness // 2
+    offsets = range(-(thickness // 2), thickness - thickness // 2)  # exactly `thickness` offsets
 
     def plot(x, y, colour):
         x, y = np.rint(x).astype(int), np.rint(y).astype(int)
-        for oy in range(-r, r + 1):
-            for ox in range(-r, r + 1):
+        for oy in offsets:
+            for ox in offsets:
                 xx, yy = x + ox, y + oy
-                ok = _in_bounds(xx, yy, h, w)
+                ok = in_bounds(xx, yy, h, w)
                 out[yy[ok], xx[ok]] = colour
 
     for x1, y1, x2, y2 in lines:

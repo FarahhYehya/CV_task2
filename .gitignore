@@ -8,3 +8,6 @@ env/
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Test cache
+.pytest_cache/

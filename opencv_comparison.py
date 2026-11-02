@@ -1,15 +1,16 @@
 """
-OpenCV reference implementations - used ONLY to compare against image_processing.py
-(your from-scratch code).  Do not send this file to your teammate.
+OpenCV reference implementations - used ONLY to compare against
+services/Canny_and_objects_detection.py (the from-scratch code).  Not used by the API.
 Each function returns the same format as its from-scratch twin.  The clean-up steps that are
 not part of the compared algorithms (merging duplicate lines, checking the outline, removing
-duplicate shapes, dropping circles from the ellipses) are shared with image_processing.py so
+duplicate shapes, dropping circles from the ellipses) are shared with the from-scratch code so
 both sides follow exactly the same rules.
+Run from CV_task2/ so that `services` can be imported.
 """
 import cv2
 import numpy as np
-from image_processing import (_merge_similar_lines, _outline_support, _remove_duplicates,
-                              _remove_circles, _ellipse_error, _rotate)
+from services.Canny_and_objects_detection import (_merge_similar_lines, _outline_support, _remove_duplicates,
+                                                  _remove_circles, _ellipse_error, _rotate)
 
 
 def _gray(image):

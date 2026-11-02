@@ -1,17 +1,19 @@
-Expected results with the from-scratch image_processing.py (NumPy only)
+Expected results with the from-scratch services/Canny_and_objects_detection.py (NumPy only)
 
-NOTE: a circle is also an ellipse, so every circle shows up in BOTH the circle and
-the ellipse counts. Ellipse count = (# circles found) + (# true ellipses).
+NOTE: a circle is also an ellipse (a == b), but every shape is counted ONCE:
+near-circular ellipses (minor axis >= 90% of the major axis) are removed from the
+ellipse list because detect_circles already reports them. So the ellipse column
+counts only the real (non-circular) ellipses.
 
 image                                  lines  circles  ellipses   what it tests
-01_basic_shapes.png                      5       1        2       rectangle(4 sides) + line, 1 circle, 1 ellipse
+01_basic_shapes.png                      5       1        1       rectangle(4 sides) + line, 1 circle, 1 ellipse
 02_lines_only.png                        5       0        0       triangle + 2 crossing lines (fragment joining)
-03_circles_only.png                      0       6        6       6 circles of different sizes
+03_circles_only.png                      0       6        0       6 circles of different sizes
 04_ellipses_only.png                     0       0        4       4 ellipses at different angles (no false circles)
-05_noisy_colour.png                      5       1        2       coloured background + noise
-06_realistic_objects.png                 5       2        3       clock, plate, box, ball on textured table
+05_noisy_colour.png                      5       1        1       coloured background + noise
+06_realistic_objects.png                 5       2        1       clock, plate, box, ball on textured table
 07_no_round_shapes.png                  12       0        0       only rectangles/triangle/line (no false circles/ellipses)
-08_gradient_background.png               1       1        2       gradient background, white + black strokes
-09_concentric_circles_limitation.png     0       3        3       3 concentric circles (radius histogram per centre finds all 3)
+08_gradient_background.png               1       1        1       gradient background, white + black strokes
+09_concentric_circles_limitation.png     0       3        0       3 concentric circles (radius histogram per centre finds all 3)
 
-Line counts are "reasonable", not exact: 06 has clock hands/ticks, so +/-1 is normal.
+Line counts are "reasonable", not exact: 06 has clock hands/ticks, so +/-1 is normal (the code finds 6).
