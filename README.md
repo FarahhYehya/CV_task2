@@ -32,6 +32,16 @@ python -m pytest tests              # 28 tests, ~1 minute (the ellipse detector 
 
 Command-line snake (click the contour with the mouse): `python -m services.Active_contour image.png`
 
+Frontend (React + Tailwind, second terminal, from `CV_task2/frontend/`, backend must be running):
+```bash
+npm install                         # pinned versions in package.json
+npm run dev                         # UI on http://localhost:5173, /api/* is proxied to port 8000
+```
+How the UI works: upload the image once, it is shared by both tabs. Each tab keeps its own options,
+contour and last result while you switch tabs. Every result (shapes, Canny edges, snake) is added to
+the "Input image" picker of both tabs, so it can be used as the next input. Results are shown with a
+**Slider** (drag the line over the image) or **Side by side**. A new upload clears all results (options are kept).
+
 ---
 
 ## 2. Flow
@@ -77,6 +87,7 @@ CV_task2/
 ├── tests/                               test_services.py, test_api.py
 ├── Test_images/                         9 test images + EXPECTED_RESULTS.txt
 ├── opencv_comparison.py                 OpenCV versions, only to compare (not used by the API)
+├── frontend/                            React + Tailwind UI (Vite): src/App.jsx (shared state), views/ (one per tab), components/
 ├── docs/                                TASK2_EXPLAINED.md, CODE_REVIEW.md
 └── requirements.txt                     pinned versions
 ```
@@ -163,4 +174,4 @@ print(r.json()["perimeter"], r.json()["area"])
 | **No image size limit** | Team decision. Note: ellipse memory grows with image size² (~225 MB per accumulator copy at 2000×1500) |
 | **Plain `def` endpoints** | CPU-heavy NumPy work runs in FastAPI's worker threads, so one slow request doesn't block others |
 | **No database** | Every request is image in → result out; nothing to store |
-| **No CORS** | Same as Task 1: the frontend dev server will proxy `/api/*` to the backend |
+| **No CORS** | Same as Task 1: the frontend dev server proxies `/api/*` to the backend (`frontend/vite.config.js`) |
